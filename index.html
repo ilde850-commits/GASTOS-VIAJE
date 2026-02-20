@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2196f3">
+<meta charset="UTF-8">
+<title>Gastos Viaje</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+body{font-family:Arial;margin:0;background:#f0f0f0}
+header{background:#2196f3;color:white;padding:15px;text-align:center;font-size:20px}
+.container{padding:15px}
+button{width:100%;padding:12px;margin:6px 0;font-size:16px;border:none;border-radius:6px;background:#4caf50;color:white}
+input,select{width:100%;padding:10px;margin:6px 0}
+.card{background:white;padding:12px;margin:10px 0;border-radius:6px}
+img{max-width:100%;margin-top:8px}
+table{width:100%;border-collapse:collapse;background:white}
+th,td{border:1px solid #ccc;padding:8px;text-align:right}
+th:first-child,td:first-child{text-align:left}
+
+@media print{
+button{display:none}
+body{background:white}
+}
+</style>
+</head>
+
+<body>
+
+<header>Gastos de Viaje</header>
+<div class="container" id="app"></div>
+
+<script>
+
+let db;
+const req=indexedDB.open("gastosDB",200);
+
+req.onupgradeneeded=e=>{
+ db=e.target.result;
+ db.createObjectStore("viajes",{keyPath:"id",autoIncrement:true});
+ db.createObjectStore("gastos",{keyPath:"id",autoIncrement:true});
+};
+
+req.onsuccess=e=>{
+ db=e.target.result;
+ mostrarViajes();
+};
+
+/* BACKUP */
+
+function exportarDatos(){
+ const tx=db.transaction(["viajes","gastos"]);
+ const v=tx.objectStore("viajes").getAll();
+ const g=tx.objectStore("gastos").getAll();
+ tx.oncomplete=()=>{
+  const blob=new Blob([JSON.stringify({viajes:v.result,gastos:g.result})]);
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="backup_gastos.json";
+  a.click();
+ };
+}
+
+function importarDatos(){
+ const input=document.createElement("input");
+ input.type="file";
+ input.onchange=e=>{
+  const reader=new FileReader();
+  reader.onload=()=>{
+   const data=JSON.parse(reader.result);
+   const tx=db.transaction(["viajes","gastos"],"readwrite");
+   data.viajes.forEach(v=>tx.objectStore("viajes").put(v));
+   data.gastos.forEach(g=>tx.objectStore("gastos").put(g));
+   tx.oncomplete=mostrarViajes;
+  };
+  reader.readAsText(e.target.files[0]);
+ };
+ input.click();
+}
+
+/* VIAJES */
+
+function mostrarViajes(){
+ db.transaction("viajes").objectStore("viajes").getAll().onsuccess=e=>{
+  let html=`
+  <button onclick="nuevoViaje()">➕ Nuevo Viaje</button>
+  <button onclick="exportarDatos()">📤 Exportar</button>
+  <button onclick="importarDatos()">📥 Importar</button>
+  `;
+  e.target.result.forEach(v=>{
+   html+=`<div class="card" onclick="abrirViaje(${v.id})">
+   <b>${v.nombre}</b><br>
+   ${v.fechaIni} - ${v.fechaFin}<br>
+   Km inicio: ${v.kmInicio || "-"}
+   </div>`;
+  });
+  app.innerHTML=html;
+ };
+}
+
+function nuevoViaje(){
+ app.innerHTML=`
+ Nombre:<input id="nombre">
+ Fecha inicio:<input type="date" id="fechaIni">
+ Fecha fin:<input type="date" id="fechaFin">
+ Km inicio:<input id="kmInicio" type="number">
+ <button onclick="guardarViaje()">Guardar</button>`;
+}
+
+function guardarViaje(){
+ db.transaction("viajes","readwrite").objectStore("viajes")
+ .add({
+  nombre:nombre.value,
+  fechaIni:fechaIni.value,
+  fechaFin:fechaFin.value,
+  kmInicio: kmInicio.value?parseInt(kmInicio.value):null
+ }).onsuccess=mostrarViajes;
+}
+
+/* GASTOS */
+
+function abrirViaje(id){
+ db.transaction("gastos").objectStore("gastos").getAll().onsuccess=e=>{
+  let html=`<button onclick="mostrarViajes()">⬅ Volver</button>
+  <button onclick="nuevoGasto(${id})">➕ Gasto</button>
+  <button onclick="generarInforme(${id})">📊 Informe</button>
+  <div id="lista"></div>`;
+  app.innerHTML=html;
+
+  const cont=document.getElementById("lista");
+
+  e.target.result.filter(g=>g.viaje==id).forEach(g=>{
+   const card=document.createElement("div");
+   card.className="card";
+   card.innerHTML=`<b>${g.tipo}</b> - ${g.importe}€<br>${g.concepto}`;
+   card.onclick=()=>editarGasto(g.id);
+   cont.appendChild(card);
+  });
+ };
+}
+
+/* NUEVO GASTO */
+
+function nuevoGasto(viaje){
+ app.innerHTML=`
+ Tipo:<select id="tipo">
+ <option>COMBUSTIBLE</option>
+ <option>COMBUSTIBLE SOLRED</option>
+ <option>HOTEL</option>
+ <option>RESTAURANTE</option>
+ <option>TAXI</option>
+ <option>PARKING</option>
+ <option>VUELOS</option>
+ <option>COCHE DE ALQUILER</option>
+ <option>AUTOPISTA</option>
+ </select>
+
+ Concepto:<input id="concepto">
+ Importe:<input id="importe" type="number">
+ Kilómetros:<input id="km" type="number">
+
+ Pago:<select id="pago">
+ <option>METALICO</option>
+ <option>TARJETA</option>
+ </select>
+
+ Ticket:<input type="file" id="ticket" accept="image/*" capture="camera">
+
+ <button onclick="guardarNuevo(${viaje})">Guardar</button>`;
+}
+
+function guardarNuevo(viaje){
+ const ticket=document.getElementById("ticket");
+ const guardar=(img)=>{
+  db.transaction("gastos","readwrite").objectStore("gastos")
+  .add({
+   viaje,
+   tipo:tipo.value,
+   concepto:concepto.value,
+   importe:parseFloat(importe.value),
+   pago:pago.value,
+   km: km.value?parseInt(km.value):null,
+   ticket:img||""
+  }).onsuccess=()=>abrirViaje(viaje);
+ };
+ if(ticket.files.length){
+  const reader=new FileReader();
+  reader.onload=e=>guardar(e.target.result);
+  reader.readAsDataURL(ticket.files[0]);
+ } else guardar("");
+}
+
+/* EDITAR GASTO */
+
+function editarGasto(id){
+ db.transaction("gastos").objectStore("gastos").get(id).onsuccess=e=>{
+  const g=e.target.result;
+
+  app.innerHTML=`
+  Tipo:<select id="tipo">
+  <option>COMBUSTIBLE</option>
+  <option>COMBUSTIBLE SOLRED</option>
+  <option>HOTEL</option>
+  <option>RESTAURANTE</option>
+  <option>TAXI</option>
+  <option>PARKING</option>
+  <option>VUELOS</option>
+  <option>COCHE DE ALQUILER</option>
+  <option>AUTOPISTA</option>
+  </select>
+
+  Concepto:<input id="concepto" value="${g.concepto}">
+  Importe:<input id="importe" value="${g.importe}">
+  Km:<input id="km" value="${g.km||''}">
+
+  Pago:<select id="pago">
+  <option>METALICO</option>
+  <option>TARJETA</option>
+  </select>
+
+  Ticket:<input type="file" id="ticket" accept="image/*">
+
+  <button onclick="guardarEdicion(${g.id},${g.viaje})">Guardar</button>
+  <button onclick="abrirViaje(${g.viaje})">⬅ Volver</button>
+
+  ${g.ticket?`<img src="${g.ticket}">`:""}
+  `;
+
+  tipo.value=g.tipo;
+  pago.value=g.pago;
+ };
+}
+
+function guardarEdicion(id,viaje){
+ const ticket=document.getElementById("ticket");
+
+ const guardar=(img)=>{
+  db.transaction("gastos","readwrite").objectStore("gastos")
+  .put({
+   id,viaje,
+   tipo:tipo.value,
+   concepto:concepto.value,
+   importe:parseFloat(importe.value),
+   pago:pago.value,
+   km: km.value?parseInt(km.value):null,
+   ticket:img||""
+  }).onsuccess=()=>abrirViaje(viaje);
+ };
+
+ if(ticket.files.length){
+  const reader=new FileReader();
+  reader.onload=e=>guardar(e.target.result);
+  reader.readAsDataURL(ticket.files[0]);
+ } else guardar(null);
+}
+
+/* INFORME */
+
+function generarInforme(id){
+
+ const tx=db.transaction(["viajes","gastos"]);
+ const vReq=tx.objectStore("viajes").get(id);
+ const gReq=tx.objectStore("gastos").getAll();
+
+ tx.oncomplete=()=>{
+
+  const viaje=vReq.result;
+  const gastos=gReq.result.filter(g=>g.viaje==id);
+
+  const tipos={};
+
+  gastos.forEach(g=>{
+   if(!tipos[g.tipo]) tipos[g.tipo]={met:0,tar:0};
+   g.pago=="METALICO" ? tipos[g.tipo].met+=g.importe : tipos[g.tipo].tar+=g.importe;
+  });
+
+  let totalMet=0,totalTar=0;
+
+  let html=`
+  <button onclick="abrirViaje(${id})">⬅ Volver</button>
+  <button onclick="window.print()">🖨️ PDF</button>
+
+  <h2>Informe de gastos</h2>
+  <b>${viaje.nombre}</b><br>
+  ${viaje.fechaIni} - ${viaje.fechaFin}<br><br>
+
+  <table>
+  <tr><th>Concepto</th><th>Metálico</th><th>Tarjeta</th><th>Total</th></tr>
+  `;
+
+  for(let t in tipos){
+   const m=tipos[t].met;
+   const t2=tipos[t].tar;
+
+   html+=`<tr>
+   <td>${t}</td>
+   <td>${m.toFixed(2)}</td>
+   <td>${t2.toFixed(2)}</td>
+   <td>${(m+t2).toFixed(2)}</td>
+   </tr>`;
+
+   if(t!="HOTEL" && t!="COMBUSTIBLE SOLRED"){
+    totalMet+=m;
+    totalTar+=t2;
+   }
+  }
+
+  html+=`
+  <tr style="font-weight:bold;background:#eee">
+  <td>TOTAL</td>
+  <td>${totalMet.toFixed(2)}</td>
+  <td>${totalTar.toFixed(2)}</td>
+  <td>${(totalMet+totalTar).toFixed(2)}</td>
+  </tr>
+  </table>
+  `;
+
+  html+="<br><h3>Registro de kilómetros</h3>";
+
+  if(viaje.kmInicio){
+   html+=`Inicio viaje — ${viaje.kmInicio} km<br>`;
+  }
+
+  gastos.filter(g=>g.km).forEach((r,i)=>{
+   html+=`Repostaje ${i+1} — ${r.km} km<br>`;
+  });
+
+  app.innerHTML=html;
+ };
+
+}
+
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js");
+}
+</script>
+</body>
+</html>
