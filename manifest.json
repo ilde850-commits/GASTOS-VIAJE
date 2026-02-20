@@ -1,10 +1,13 @@
 {
   "name": "Control de Gastos de Viaje",
   "short_name": "Gastos",
-  "start_url": "index.html",
+  "start_url": "/index.html",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#2196f3",
   "theme_color": "#2196f3",
+  "description": "Aplicación para el control y gestión de gastos de viaje con informes y tickets.",
   "icons": [
     {
       "src": "icon.png",
